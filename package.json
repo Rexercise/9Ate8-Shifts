@@ -1,0 +1,7 @@
+{
+  "name": "rexercise-gtop-indicator-checks",
+  "private": true,
+  "type": "module",
+  "scripts": {"test": "node tests/indicator.mjs"},
+  "devDependencies": {"pinets": "0.11.0"}
+}

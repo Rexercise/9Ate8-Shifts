@@ -1,18 +1,16 @@
 //@version=6
-indicator("Rexercise | GTOP Ribbon + Ranges v2.1", shorttitle="GTOP v2.1", overlay=true, scale=scale.none, max_boxes_count=500, max_lines_count=500, max_labels_count=50, behind_chart=true)
+indicator("Rexercise | GTOP Butterfly of Relevance v2.3", shorttitle="GTOP v2.3", overlay=true, scale=scale.none, max_boxes_count=500, max_lines_count=500, max_labels_count=100, behind_chart=true)
 
 // INSTALL: Paste into a NEW TradingView Pine indicator, save, and Add to chart.
-// v2.1 matches Rexercise's higher hand-drawn ribbon: one continuous, soft-color
-// row under the candles, including the overnight Not The Job bridge. Defaults
-// show the current block through its scheduled end, without projecting the
-// rest of the day. Oct 5's green The Job is the supplied MANUAL annotation;
-// other dates stay neutral. Change/reset that dated bias in Inputs as needed.
-// v2.0 adds a user-selected monthly > weekly > daily > H4 context stack.
-// Anchor relevance, objectives and narrative are manual; no automatic Butterfly
-// detection or probability claim. Source OHLC uses confirmed full candle ranges.
+// v2.3: Butterfly of Relevance = one side purged + opposite DOL still pending.
+// All layers advance chronologically; untouched candidates remain hidden.
+// Keep a relevant range until delivery/invalidation, then advance to the next
+// qualifying range. The watermark sticky note never drives selection.
+// This visual aid does not confirm an entry. See README for confirmation timing.
 // The compact chart drawing is retained: a slim, light time-aligned strip
 // inside the PRICE chart. Its blocks use real New York timestamps and move
-// with candles when scrolling/zooming. No fixed-screen table or separate pane.
+// with candles when scrolling/zooming. The ribbon uses no fixed-screen table
+// or separate pane; only the watermark/note remains pinned to chart corners.
 // If updating a pane-based version, remove/re-add this chart instance so the
 // overlay setting takes effect. Existing manual chart drawings are untouched.
 // Ribbon vertical placement uses the visible candles' high/low range. It
@@ -33,90 +31,121 @@ indicator("Rexercise | GTOP Ribbon + Ranges v2.1", shorttitle="GTOP v2.1", overl
 // On bars crossing a range boundary, 1m/5m intrabars prevent including prices
 // from outside that range. Older intrabars can be unavailable on TradingView;
 // the chart warns and affected ranges are omitted/marked PARTIAL, not guessed.
-// Completed values are frozen. No trading, orders, or automatic CRT claims.
+// Completed values are frozen. No orders, entry confirmation or edge claims.
 
 // SETTINGS -------------------------------------------------------------------
-string G_STACK = "00 | Top-down GTOP context"
-bool stackOn = input.bool(true, "Selected context stack", group=G_STACK)
-bool showStackCard = input.bool(true, "Context / shift / execution card", group=G_STACK)
-bool extendStackBounds = input.bool(true, "Carry selected high / low onto lower timeframes", group=G_STACK)
-string narrativeDirection = input.string("Unspecified", "Selected narrative direction", options=["Unspecified", "Bullish", "Bearish"], group=G_STACK)
-string narrativeText = input.string("Butterfly: July + September > Week3Sep > Thursday > London Lunch", "My narrative (manual)", group=G_STACK, tooltip="Your own context/narrative. This text is not an automatic pattern or probability assessment.")
+// Automatic boxes are selected from price, never a named example date.
+string G_AUTO = "00 | Butterfly of Relevance"
+bool autoOn = input.bool(true, "Box relevant ranges automatically", group=G_AUTO, tooltip="Relevant means one side has been purged and the opposite DOL remains pending. Untouched candidates stay hidden. Confirmed source closes invalidate; reaching the DOL completes relevance. The same chronological framework applies to every layer.")
+bool autoM = input.bool(true, "Monthly", inline="layers", group=G_AUTO)
+bool autoW = input.bool(true, "Weekly", inline="layers", group=G_AUTO)
+bool autoD = input.bool(true, "Daily", inline="layers", group=G_AUTO)
+bool autoH4 = input.bool(true, "GTOP H4", inline="layers2", group=G_AUTO)
+bool autoH1 = input.bool(true, "Hourly shift CRT", inline="layers2", group=G_AUTO)
+bool autoM15 = input.bool(true, "M15", inline="layers3", group=G_AUTO)
+bool autoM5 = input.bool(true, "M5", inline="layers3", group=G_AUTO)
+bool autoChart = input.bool(true, "Other chart timeframes", inline="layers3", group=G_AUTO, tooltip="Applies the same relevance sequence to the current chart timeframe if it is not already covered by M/W/D/GTOP H4/H1/M15/M5. Examples: M1, M30, H2. No duplicate native H4 alongside GTOP H4.")
+int autoLookback = input.int(120, "Source ranges to consider per layer", minval=12, maxval=240, group=G_AUTO, tooltip="Bounds the available history; this does not claim to scan all history. H4 uses complete New York windows. H1 starts at 8 and rolls only after invalidation within the following shift.")
+int autoKeep = input.int(3, "Relevant ranges per context layer (oldest first)", minval=1, maxval=8, group=G_AUTO, tooltip="Applies AFTER the purge-and-pending-DOL test. The oldest surviving relevant ranges keep priority; newer untouched candles never displace them. Raise this to show more concurrent relevant ranges. H1 has one chronological shift anchor.")
+bool autoDol = input.bool(true, "Extend draw on liquidity only", group=G_AUTO, tooltip="Extends the pending opposite extreme after a one-side purge. Untouched or completed ranges are not shown. No paired high/low extensions.")
+bool autoMidpoints = input.bool(false, "Optional internal 50% reference", group=G_AUTO)
+int autoFill = input.int(96, "Box fill transparency", minval=80, maxval=100, group=G_AUTO)
+color autoMonthColor = input.color(color.rgb(120,120,135), "Monthly", inline="autoColor1", group=G_AUTO)
+color autoWeekColor = input.color(color.rgb(85,115,195), "Weekly", inline="autoColor1", group=G_AUTO)
+color autoDayColor = input.color(color.rgb(195,142,55), "Daily", inline="autoColor2", group=G_AUTO)
+color autoH4Color = input.color(color.rgb(92,151,164), "H4", inline="autoColor2", group=G_AUTO)
+color autoHourColor = input.color(color.rgb(153,110,177), "H1", inline="autoColor2", group=G_AUTO)
+
+string G_MARK = "12 | Watermark and sticky note"
+bool watermarkOn = input.bool(true, "Watermark", group=G_MARK)
+string watermarkTitle = input.string("G.T.O.P Rexercise", "Title", group=G_MARK)
+string watermarkMotto = input.string("Victory Loves Preparation", "Motto", group=G_MARK)
+bool watermarkInfo = input.bool(true, "Symbol / timeframe / chart date", group=G_MARK)
+bool stickyOn = input.bool(true, "Sticky note", group=G_MARK, tooltip="Show or hide your note independently of range selection. Enter text below. A blank note draws nothing.")
+string stickyText = input.text_area("", "My sticky note", group=G_MARK, tooltip="Your own reminders or analysis, including line breaks. This text is never read by the range engine or used to infer a sequence, bias or setup.")
+int stickySize = input.int(14, "Sticky note text size", minval=8, maxval=28, group=G_MARK)
+color watermarkInk = input.color(color.rgb(45,45,40), "Text color", group=G_MARK)
+color stickyColor = input.color(color.rgb(248,238,183), "Note background", group=G_MARK)
+int stickyFade = input.int(15, "Note transparency", minval=0, maxval=100, group=G_MARK)
+
+string G_STACK = "00.1 | Optional manual anchor overrides"
+bool stackOn = input.bool(false, "Show manually selected anchors", group=G_STACK)
+bool extendStackDol = input.bool(true, "Extend only the selected draw on liquidity", group=G_STACK)
 
 string G_MA = "00.1 | Monthly A anchor"
 string maStatus = input.string("Relevant", "Relevance", options=["Relevant", "Watch", "Retired"], group=G_MA)
-string maTitle = input.string("July", "Label", group=G_MA)
+string maTitle = input.string("Monthly A", "Label", group=G_MA)
 string maMode = input.string("Source candle", "Bounds from", options=["Source candle", "Manual bounds"], group=G_MA, tooltip="Source candle uses the completed full wick high/low. Manual bounds are explicit prices and times; change them when changing symbols.")
-int maDate = input.time(timestamp("15 Jul 2026 12:00 +0000"), "Date/time inside source candle", group=G_MA)
+int maDate = input.time(0, "Date/time inside source candle", group=G_MA)
 color maColor = input.color(color.rgb(145,145,155), "Color", inline="ink", group=G_MA)
-int maFade = input.int(65, "Fill transparency", minval=0, maxval=100, inline="ink", group=G_MA)
+int maFade = input.int(94, "Fill transparency", minval=0, maxval=100, inline="ink", group=G_MA)
 string maDirection = input.string("Unspecified", "My direction", options=["Unspecified", "Bullish", "Bearish"], group=G_MA)
-string maObjective = input.string("Low", "Draw on liquidity", options=["Off", "High", "Low"], group=G_MA)
+string maObjective = input.string("Off", "Draw on liquidity", options=["Off", "High", "Low"], group=G_MA)
 float maHigh = input.price(0, "Manual high", inline="bounds", group=G_MA)
 float maLow = input.price(0, "Manual low", inline="bounds", group=G_MA)
-int maStart = input.time(timestamp("01 Jul 2026 00:00 -0400"), "Manual box starts", group=G_MA)
-int maEnd = input.time(timestamp("01 Aug 2026 00:00 -0400"), "Manual box ends", group=G_MA)
+int maStart = input.time(0, "Manual box starts", group=G_MA)
+int maEnd = input.time(0, "Manual box ends", group=G_MA)
 
 string G_MB = "00.2 | Monthly B anchor"
 string mbStatus = input.string("Relevant", "Relevance", options=["Relevant", "Watch", "Retired"], group=G_MB)
-string mbTitle = input.string("September", "Label", group=G_MB)
+string mbTitle = input.string("Monthly B", "Label", group=G_MB)
 string mbMode = input.string("Source candle", "Bounds from", options=["Source candle", "Manual bounds"], group=G_MB, tooltip="Source candle uses the completed full wick high/low. Manual bounds are explicit prices and times; change them when changing symbols.")
-int mbDate = input.time(timestamp("15 Sep 2026 12:00 +0000"), "Date/time inside source candle", group=G_MB)
+int mbDate = input.time(0, "Date/time inside source candle", group=G_MB)
 color mbColor = input.color(color.rgb(178,179,185), "Color", inline="ink", group=G_MB)
-int mbFade = input.int(90, "Fill transparency", minval=0, maxval=100, inline="ink", group=G_MB)
+int mbFade = input.int(94, "Fill transparency", minval=0, maxval=100, inline="ink", group=G_MB)
 string mbDirection = input.string("Unspecified", "My direction", options=["Unspecified", "Bullish", "Bearish"], group=G_MB)
-string mbObjective = input.string("Low", "Draw on liquidity", options=["Off", "High", "Low"], group=G_MB)
+string mbObjective = input.string("Off", "Draw on liquidity", options=["Off", "High", "Low"], group=G_MB)
 float mbHigh = input.price(0, "Manual high", inline="bounds", group=G_MB)
 float mbLow = input.price(0, "Manual low", inline="bounds", group=G_MB)
-int mbStart = input.time(timestamp("01 Sep 2026 00:00 -0400"), "Manual box starts", group=G_MB)
-int mbEnd = input.time(timestamp("01 Oct 2026 00:00 -0400"), "Manual box ends", group=G_MB)
+int mbStart = input.time(0, "Manual box starts", group=G_MB)
+int mbEnd = input.time(0, "Manual box ends", group=G_MB)
 
 string G_WA = "00.3 | Weekly anchor"
 string waStatus = input.string("Relevant", "Relevance", options=["Relevant", "Watch", "Retired"], group=G_WA)
-string waTitle = input.string("Week3Sep", "Label", group=G_WA)
+string waTitle = input.string("Weekly", "Label", group=G_WA)
 string waMode = input.string("Source candle", "Bounds from", options=["Source candle", "Manual bounds"], group=G_WA, tooltip="Source candle uses the completed full wick high/low. Manual bounds are explicit prices and times; change them when changing symbols.")
-int waDate = input.time(timestamp("23 Sep 2026 12:00 +0000"), "Date/time inside source candle", group=G_WA)
+int waDate = input.time(0, "Date/time inside source candle", group=G_WA)
 color waColor = input.color(color.rgb(70,110,230), "Color", inline="ink", group=G_WA)
-int waFade = input.int(35, "Fill transparency", minval=0, maxval=100, inline="ink", group=G_WA)
+int waFade = input.int(94, "Fill transparency", minval=0, maxval=100, inline="ink", group=G_WA)
 string waDirection = input.string("Unspecified", "My direction", options=["Unspecified", "Bullish", "Bearish"], group=G_WA)
-string waObjective = input.string("Low", "Draw on liquidity", options=["Off", "High", "Low"], group=G_WA)
+string waObjective = input.string("Off", "Draw on liquidity", options=["Off", "High", "Low"], group=G_WA)
 float waHigh = input.price(0, "Manual high", inline="bounds", group=G_WA)
 float waLow = input.price(0, "Manual low", inline="bounds", group=G_WA)
-int waStart = input.time(timestamp("21 Sep 2026 00:00 -0400"), "Manual box starts", group=G_WA)
-int waEnd = input.time(timestamp("28 Sep 2026 00:00 -0400"), "Manual box ends", group=G_WA)
+int waStart = input.time(0, "Manual box starts", group=G_WA)
+int waEnd = input.time(0, "Manual box ends", group=G_WA)
 
 string G_DA = "00.4 | Daily anchor"
 string daStatus = input.string("Relevant", "Relevance", options=["Relevant", "Watch", "Retired"], group=G_DA)
-string daTitle = input.string("Thursday", "Label", group=G_DA)
+string daTitle = input.string("Daily", "Label", group=G_DA)
 string daMode = input.string("Source candle", "Bounds from", options=["Source candle", "Manual bounds"], group=G_DA, tooltip="Source candle uses the completed full wick high/low. Manual bounds are explicit prices and times; change them when changing symbols.")
-int daDate = input.time(timestamp("01 Oct 2026 12:00 +0000"), "Date/time inside source candle", group=G_DA)
+int daDate = input.time(0, "Date/time inside source candle", group=G_DA)
 color daColor = input.color(color.rgb(255,183,64), "Color", inline="ink", group=G_DA)
-int daFade = input.int(35, "Fill transparency", minval=0, maxval=100, inline="ink", group=G_DA)
+int daFade = input.int(94, "Fill transparency", minval=0, maxval=100, inline="ink", group=G_DA)
 string daDirection = input.string("Unspecified", "My direction", options=["Unspecified", "Bullish", "Bearish"], group=G_DA)
 string daObjective = input.string("Off", "Draw on liquidity", options=["Off", "High", "Low"], group=G_DA)
 float daHigh = input.price(0, "Manual high", inline="bounds", group=G_DA)
 float daLow = input.price(0, "Manual low", inline="bounds", group=G_DA)
-int daStart = input.time(timestamp("01 Oct 2026 00:00 -0400"), "Manual box starts", group=G_DA)
-int daEnd = input.time(timestamp("02 Oct 2026 00:00 -0400"), "Manual box ends", group=G_DA)
+int daStart = input.time(0, "Manual box starts", group=G_DA)
+int daEnd = input.time(0, "Manual box ends", group=G_DA)
 
 string G_HA = "00.5 | H4 session anchor"
 string haStatus = input.string("Relevant", "Relevance", options=["Relevant", "Watch", "Retired"], group=G_HA)
-string haTitle = input.string("London Lunch", "Label", group=G_HA)
+string haTitle = input.string("H4 session", "Label", group=G_HA)
 string haMode = input.string("Source candle", "Bounds from", options=["Source candle", "Manual bounds"], group=G_HA, tooltip="Source candle uses the completed full wick high/low. Manual bounds are explicit prices and times; change them when changing symbols.")
-int haDate = input.time(timestamp("02 Oct 2026 12:00 +0000"), "Date/time inside source candle", tooltip="Select the local date for the 5-9 AM America/New_York session. Four closed hourly candles are required.", group=G_HA)
+int haDate = input.time(0, "Date/time inside source candle", tooltip="Select a time inside any GTOP H4 window. Uses its New York session boundaries and requires complete hourly coverage.", group=G_HA)
 color haColor = input.color(color.rgb(125,125,135), "Color", inline="ink", group=G_HA)
-int haFade = input.int(78, "Fill transparency", minval=0, maxval=100, inline="ink", group=G_HA)
+int haFade = input.int(94, "Fill transparency", minval=0, maxval=100, inline="ink", group=G_HA)
 string haDirection = input.string("Unspecified", "My direction", options=["Unspecified", "Bullish", "Bearish"], group=G_HA)
-string haObjective = input.string("Low", "Draw on liquidity", options=["Off", "High", "Low"], group=G_HA)
+string haObjective = input.string("Off", "Draw on liquidity", options=["Off", "High", "Low"], group=G_HA)
 float haHigh = input.price(0, "Manual high", inline="bounds", group=G_HA)
 float haLow = input.price(0, "Manual low", inline="bounds", group=G_HA)
-int haStart = input.time(timestamp("02 Oct 2026 05:00 -0400"), "Manual box starts", group=G_HA)
-int haEnd = input.time(timestamp("02 Oct 2026 09:00 -0400"), "Manual box ends", group=G_HA)
+int haStart = input.time(0, "Manual box starts", group=G_HA)
+int haEnd = input.time(0, "Manual box ends", group=G_HA)
 
 string G_EXEC = "00.6 | Shift execution: Model1 / Super Soup"
 bool selectedModelOn = input.bool(false, "Use a manually selected Model1 candle", group=G_EXEC)
 string selectedModelTF = input.timeframe("5", "Assigned Model1 / CISD timeframe", group=G_EXEC)
-int selectedModelDate = input.time(timestamp("05 Oct 2026 09:00 -0400"), "Date/time inside the Model1 candle", group=G_EXEC)
+int selectedModelDate = input.time(0, "Date/time inside the Model1 candle", group=G_EXEC)
 string selectedModelAnchor = input.string("H4 session", "Selected CRT liquidity anchor", options=["Monthly A", "Monthly B", "Weekly", "Daily", "H4 session"], group=G_EXEC)
 string selectedModelDirection = input.string("Unspecified", "Execution direction", options=["Unspecified", "Bullish", "Bearish"], group=G_EXEC)
 string selectedSetup = input.string("Model1 selected", "My execution setup", options=["Model1 selected", "Super Soup (pre-CISD)", "Stand aside"], group=G_EXEC)
@@ -151,17 +180,17 @@ color neutralColor = input.color(color.rgb(203, 202, 178), "Neutral", inline="pa
 color dayNeutral = input.color(color.rgb(248, 210, 189), "The Job neutral fill", group=G_BIAS)
 color nightNeutral = input.color(color.rgb(248, 210, 189), "Nightshift neutral fill", group=G_BIAS)
 // Neutral session fills match the drawing and do not express market direction.
-string dayBias = input.string("Bullish", "The Job | 9 AM-noon", options=["Bullish", "Bearish", "Neutral"], group=G_BIAS, tooltip="Default reproduces the green Oct 5 block in your drawing. This is a manual annotation, never an automatic signal.")
+string dayBias = input.string("Neutral", "The Job | 9 AM-noon", options=["Bullish", "Bearish", "Neutral"], group=G_BIAS, tooltip="Manual annotation only. No date or direction is preselected.")
 string offBias = input.string("Neutral", "Not The Job | noon-9 PM", options=["Bullish", "Bearish", "Neutral"], group=G_BIAS)
 string nightBias = input.string("Neutral", "Nightshift | 9 PM-midnight", options=["Bullish", "Bearish", "Neutral"], group=G_BIAS)
 string earlyBias = input.string("Neutral", "Not The Job | midnight-9 AM", options=["Bullish", "Bearish", "Neutral"], group=G_BIAS)
 string biasScope = input.string("Selected date", "Apply manual biases to", options=["All dates", "Selected date"], group=G_BIAS, tooltip="All dates recolors every occurrence of each slot. Selected date colors windows starting on that local date, including the 9 PM-1 AM window into the next day; other windows remain neutral. Pine ribbons cannot be clicked to change their color.")
-int biasDate = input.time(timestamp("05 Oct 2026 12:00 +0000"), "Selected date (interpreted in GTOP timezone)", group=G_BIAS)
+int biasDate = input.time(0, "Selected date (interpreted in GTOP timezone)", group=G_BIAS)
 
 string G_STYLE = "03 | Price range style"
-bool showRanges = input.bool(true, "Enable price range boxes", group=G_STYLE)
+bool showRanges = input.bool(false, "Extra scheduled range boxes (includes history)", group=G_STYLE)
 bool rangeLabels = input.bool(true, "Range names", inline="extras", group=G_STYLE)
-bool midpoints = input.bool(true, "50% lines", inline="extras", group=G_STYLE)
+bool midpoints = input.bool(false, "50% lines", inline="extras", group=G_STYLE)
 bool rangeWidths = input.bool(false, "Show range width in price units", group=G_STYLE, tooltip="Raw high minus low, in the symbol's price units. No assumption about pip or contract values.")
 int fillFade = input.int(93, "Range fill transparency", minval=0, maxval=100, group=G_STYLE)
 int edgeFade = input.int(22, "Range border transparency", minval=0, maxval=100, group=G_STYLE)
@@ -237,12 +266,12 @@ bool showFocus = input.bool(false, "Compact latest-bar 9ate8 status card", group
 
 // Context is explicitly selected, never inferred as a directional trade thesis.
 string G_CONTEXT = "10 | Gray higher-timeframe context"
-string contextSource = input.string("Previous week", "Gray context range", options=["Off", "Previous day", "Previous week", "Previous month", "Manual bounds"], group=G_CONTEXT)
+string contextSource = input.string("Off", "Gray context range", options=["Off", "Previous day", "Previous week", "Previous month", "Manual bounds"], group=G_CONTEXT)
 color contextColor = input.color(color.rgb(145, 145, 145), "Gray box", group=G_CONTEXT)
 int contextFade = input.int(85, "Gray box transparency", minval=0, maxval=100, group=G_CONTEXT)
 float manualHigh = input.price(0, "Manual context high", group=G_CONTEXT)
 float manualLow = input.price(0, "Manual context low", group=G_CONTEXT)
-int manualStart = input.time(timestamp("28 Sep 2026 00:00 +0000"), "Manual context starts", group=G_CONTEXT)
+int manualStart = input.time(0, "Manual context starts", group=G_CONTEXT)
 
 string G_TARGET = "11 | Draw on liquidity (manual)"
 string targetSide = input.string("Off", "Liquidity objective", options=["Off", "High (buy-side)", "Low (sell-side)"], group=G_TARGET, tooltip="Choose the side from your own analysis. The eye marks an objective, not an entry signal. Default Off avoids inventing a directional thesis.")
@@ -319,6 +348,291 @@ if time == viewRight
     selectedContextStart := contextSource == "Manual bounds" ? manualStart : contextT
     selectedContextFinish := contextSource == "Manual bounds" ? manualStart : contextTC
 
+// AUTOMATIC CONFIRMED-RANGE ENGINE -------------------------------------------
+// All OHLC passed into this engine is offset by one SOURCE bar. No developing
+// source values, barstate.isconfirmed inside security(), or future HTF values.
+// The same lifecycle runs for every context layer. No weekday/date presets.
+type ActiveRange
+    float hi
+    float lo
+    int begins
+    int ends
+    int born
+    string title
+    bool highTaken = false
+    bool lowTaken = false
+    bool upperPurged = false
+    bool lowerPurged = false
+
+// 0 = remains (waiting or relevant), 1 = source-close invalidation,
+// 2 = objective delivered or both sides reached in the activation candle.
+// Objective tracking starts at the first strict purge, not before it.
+// Equal-edge touches alone do not activate relevance. Same-bar two-sided
+// action has no provably pending DOL; suppress it without inferring event order.
+f_active_reason(ActiveRange r, float h, float l, float c) =>
+    int reason = 0
+    if c > r.hi or c < r.lo
+        reason := 1
+    else if r.upperPurged
+        r.lowTaken := r.lowTaken or l <= r.lo
+        reason := r.lowTaken ? 2 : 0
+    else if r.lowerPurged
+        r.highTaken := r.highTaken or h >= r.hi
+        reason := r.highTaken ? 2 : 0
+    else if h > r.hi
+        r.upperPurged := true
+        r.highTaken := true
+        r.lowTaken := l <= r.lo
+        r.lowerPurged := l < r.lo
+        reason := r.lowTaken ? 2 : 0
+    else if l < r.lo
+        r.lowerPurged := true
+        r.lowTaken := true
+        r.highTaken := h >= r.hi
+        reason := r.highTaken ? 2 : 0
+    reason
+
+f_relevant(ActiveRange r) =>
+    (r.upperPurged and not r.lowerPurged and not r.lowTaken) or (r.lowerPurged and not r.upperPurged and not r.highTaken)
+
+f_active_step(array<ActiveRange> pool, float h, float l, float c, int s, int e, int seq, string title) =>
+    int i = array.size(pool) - 1
+    while i >= 0
+        ActiveRange r = array.get(pool, i)
+        int reason = f_active_reason(r, h, l, c)
+        if reason != 0 or seq - r.born >= autoLookback
+            array.remove(pool, i)
+        i -= 1
+    if not na(h) and not na(l) and h > l and s < e
+        array.push(pool, ActiveRange.new(h, l, s, e, seq, title))
+    0
+
+// Return only a bounded snapshot for the source bar covering the viewport's
+// right edge. This avoids returning a growing collection on every source bar.
+// Copy each object so main-context drawing cannot mutate the source pool.
+f_active_snapshot(array<ActiveRange> pool, bool atViewport) =>
+    array<ActiveRange> result = na
+    if atViewport
+        result := array.new<ActiveRange>()
+        int i = 0
+        // Chronological priority is stable until a range delivers/invalidates.
+        // Filter BEFORE applying the display cap so waiting candles cannot
+        // hide an older purged range with an objective still pending.
+        while i < array.size(pool) and array.size(result) < autoKeep
+            ActiveRange r = array.get(pool, i)
+            if f_relevant(r)
+                array.push(result, ActiveRange.copy(r))
+            i += 1
+    result
+
+f_native_active(string layer) =>
+    var array<ActiveRange> pool = array.new<ActiveRange>()
+    var int seq = 0
+    if not na(time[1])
+        seq += 1
+        string datePattern = layer == "M" ? "MMM yyyy" : timeframe.isintraday ? "MMM d HH:mm" : "MMM d, yyyy"
+        string title = layer + " | " + str.format_time(time[1], datePattern, timeframe.isintraday ? TZ : syminfo.timezone)
+        f_active_step(pool, high[1], low[1], close[1], time[1], time_close[1], seq, title)
+    f_active_snapshot(pool, time <= viewRight and viewRight < time_close)
+
+f_h4_title(int s) =>
+    switch hour(s, TZ)
+        1 => "Asia Expansion"
+        5 => "London Lunch"
+        9 => "GCT / New York AM"
+        13 => "New York PM"
+        17 => "CBDR + Early Asia"
+        => "Asia Open"
+
+// H4 means GTOP's 1/5/9/13/17/21 NY windows, not the broker's native H4.
+// Build from consecutive closed hourly candles. DST-safe wall-clock endpoints
+// naturally accommodate a 3/5-hour overnight window; gaps are not guessed.
+f_h4_active() =>
+    var array<ActiveRange> pool = array.new<ActiveRange>()
+    var int seq = 0
+    var int starts = na
+    var int ends = na
+    var int coverageEnd = na
+    var float hi = na
+    var float lo = na
+    var bool partial = true
+    int t = time[1]
+    int tc = time_close[1]
+    if not na(t)
+        if not na(coverageEnd) and t != coverageEnd
+            // A missing hour/window could have consumed or invalidated a range.
+            array.clear(pool)
+        int hr = hour(t, TZ)
+        int firstHour = hr < 1 ? 21 : 1 + int(math.floor((hr - 1) / 4.0)) * 4
+        [s, e] = f_window(t, firstHour, firstHour + 4)
+        bool contained = t >= s and tc <= e
+        if na(starts) or starts != s
+            starts := s
+            ends := e
+            hi := high[1]
+            lo := low[1]
+            partial := t != s or not contained
+            coverageEnd := tc
+        else
+            partial := partial or t != coverageEnd or not contained
+            hi := math.max(hi, high[1])
+            lo := math.min(lo, low[1])
+            coverageEnd := tc
+        if tc == ends
+            if not partial
+                seq += 1
+                f_active_step(pool, hi, lo, close[1], starts, ends, seq, "H4 | " + f_h4_title(starts) + " | " + str.format_time(starts, "MMM d", TZ))
+            else
+                // Unknown completed H4 could have invalidated older ranges.
+                // Discard the pool rather than assert those ranges survived.
+                array.clear(pool)
+        else if tc > ends
+            array.clear(pool)
+        if time != tc
+            // The gap immediately before the current sample is also unknown.
+            array.clear(pool)
+    float mainSeconds = timeframe.in_seconds(timeframe.main_period)
+    bool atViewport = mainSeconds <= 3600 ? time <= viewRight and viewRight < time_close : time >= viewRight and time < viewRight + int(mainSeconds * 1000)
+    f_active_snapshot(pool, atViewport)
+
+// The shift starts with 8. Only a strict H1 close outside rolls chronologically
+// to the candle that invalidated it. Delivery stops selection for that shift.
+// The 9/10/11 replacements are Shift CRTs, not renamed 9ate8 setups.
+f_shift_active() =>
+    var array<ActiveRange> pool = array.new<ActiveRange>()
+    var int shiftEnds = na
+    var int lastClosed = na
+    var bool finished = false
+    int t = time[1]
+    int tc = time_close[1]
+    int hr = hour(t, TZ)
+    bool exactHour = not na(t) and minute(t, TZ) == 0 and second(t, TZ) == 0 and tc == f_stamp(t, 0, hr + 1)
+    if not na(shiftEnds) and time >= shiftEnds
+        array.clear(pool)
+        finished := true
+    if exactHour and (hr == 8 or hr == 20)
+        array.clear(pool)
+        shiftEnds := f_stamp(t, 0, hr == 8 ? 12 : 24)
+        finished := time != tc or time >= shiftEnds
+        if not finished
+            array.push(pool, ActiveRange.new(high[1], low[1], t, tc, 0, "H1 | " + str.format_time(t, "h a, MMM d", TZ) + " | 9ate8"))
+    else if not finished and not na(shiftEnds) and tc < shiftEnds and array.size(pool) > 0
+        if not exactHour or t != lastClosed
+            array.clear(pool)
+            finished := true
+        else
+            int reason = f_active_reason(array.get(pool, 0), high[1], low[1], close[1])
+            if reason != 0
+                array.clear(pool)
+                if reason == 1
+                    array.push(pool, ActiveRange.new(high[1], low[1], t, tc, 0, "H1 | " + str.format_time(t, "h a, MMM d", TZ) + " | Shift CRT"))
+                else
+                    finished := true
+    lastClosed := tc
+    if not na(tc) and time != tc
+        array.clear(pool)
+        finished := true
+    f_active_snapshot(pool, time <= viewRight and viewRight < time_close)
+
+var array<ActiveRange> visibleMonthly = na
+var array<ActiveRange> visibleWeekly = na
+var array<ActiveRange> visibleDaily = na
+var array<ActiveRange> visibleH4 = na
+var array<ActiveRange> visibleHourly = na
+var array<ActiveRange> visibleM15 = na
+var array<ActiveRange> visibleM5 = na
+var array<ActiveRange> visibleChart = na
+if autoOn and autoM and chartSeconds <= timeframe.in_seconds("1M")
+    monthRanges = request.security(syminfo.tickerid, "1M", f_native_active("M"), lookahead=barmerge.lookahead_on, calc_bars_count=500)
+    if time == viewRight
+        visibleMonthly := monthRanges
+if autoOn and autoW and chartSeconds <= timeframe.in_seconds("1W")
+    weekRanges = request.security(syminfo.tickerid, "1W", f_native_active("W"), lookahead=barmerge.lookahead_on, calc_bars_count=500)
+    if time == viewRight
+        visibleWeekly := weekRanges
+if autoOn and autoD and chartSeconds <= timeframe.in_seconds("1D")
+    dayRanges = request.security(syminfo.tickerid, "1D", f_native_active("D"), lookahead=barmerge.lookahead_on, calc_bars_count=500)
+    if time == viewRight
+        visibleDaily := dayRanges
+// On H4 charts the entire state machine still runs in the hourly context;
+// only its final snapshot is transported. Never try to rebuild H4 from a single
+// sampled hourly OHLC. Current snapshots only consume closed hourly candles.
+if autoOn and autoH4 and chartSeconds <= 14400
+    h4Ranges = request.security(syminfo.tickerid, "60", f_h4_active(), lookahead=chartSeconds <= 3600 ? barmerge.lookahead_on : barmerge.lookahead_off, calc_bars_count=8000)
+    if time == viewRight
+        visibleH4 := h4Ranges
+if autoOn and autoH1 and chartSeconds <= 3600
+    hourRanges = request.security(syminfo.tickerid, "60", f_shift_active(), lookahead=barmerge.lookahead_on, calc_bars_count=8000)
+    if time == viewRight
+        visibleHourly := hourRanges
+if autoOn and autoM15 and chartSeconds <= 900
+    m15Ranges = request.security(syminfo.tickerid, "15", f_native_active("M15"), lookahead=barmerge.lookahead_on, calc_bars_count=500)
+    if time == viewRight
+        visibleM15 := m15Ranges
+if autoOn and autoM5 and chartSeconds <= 300
+    m5Ranges = request.security(syminfo.tickerid, "5", f_native_active("M5"), lookahead=barmerge.lookahead_on, calc_bars_count=500)
+    if time == viewRight
+        visibleM5 := m5Ranges
+bool chartLayerCovered = timeframe.period == "1M" or timeframe.period == "1W" or timeframe.period == "1D" or timeframe.period == "240" or timeframe.period == "60" or timeframe.period == "15" or timeframe.period == "5"
+if autoOn and autoChart and not chartLayerCovered
+    chartRanges = f_native_active("Chart " + timeframe.period)
+    if time == viewRight
+        visibleChart := chartRanges
+
+var array<box> autoBoxes = array.new<box>()
+var array<line> autoLines = array.new<line>()
+var array<label> autoLabels = array.new<label>()
+
+f_clear_active() =>
+    for area in autoBoxes
+        box.delete(area)
+    for ray in autoLines
+        line.delete(ray)
+    for caption in autoLabels
+        label.delete(caption)
+    array.clear(autoBoxes)
+    array.clear(autoLines)
+    array.clear(autoLabels)
+    0
+
+f_draw_active(array<ActiveRange> ranges, color ink, int visibleEnd) =>
+    if not na(ranges)
+        for r in ranges
+            int leftX = math.max(r.begins, viewLeft)
+            if f_relevant(r) and r.ends <= visibleEnd and leftX < visibleEnd
+                bool drawLow = r.upperPurged and not r.lowTaken
+                bool drawHigh = r.lowerPurged and not r.highTaken
+                string status = drawLow ? "BSL purged | low DOL pending" : "SSL purged | high DOL pending"
+                string caption = rangeLabels ? r.title + " | " + status : ""
+                box area = box.new(leftX, r.hi, visibleEnd, r.lo, xloc=xloc.bar_time, bgcolor=color.new(ink, autoFill), border_color=color.new(ink, 45), text=caption, text_color=ink, text_size=size.tiny, text_halign=text.align_left, text_valign=text.align_top, force_overlay=true)
+                array.push(autoBoxes, area)
+                // The range is boxed; only the selected DOL extends beyond it.
+                if autoDol and (drawLow or drawHigh)
+                    float dol = drawLow ? r.lo : r.hi
+                    int endX = visibleEnd + int(chartSeconds * 1000 * 3)
+                    array.push(autoLines, line.new(visibleEnd, dol, endX, dol, xloc=xloc.bar_time, color=ink, width=1, force_overlay=true))
+                    array.push(autoLabels, label.new(endX, dol, "DOL", tooltip=r.title + " | " + str.tostring(dol, format.mintick), xloc=xloc.bar_time, style=label.style_label_left, color=color.new(color.white,100), textcolor=ink, size=size.tiny, force_overlay=true))
+                if autoMidpoints
+                    float middle = math.avg(r.hi, r.lo)
+                    array.push(autoLines, line.new(leftX, middle, visibleEnd, middle, xloc=xloc.bar_time, color=color.new(ink, 50), style=line.style_dotted, force_overlay=true))
+    0
+
+var table brandMark = table.new(position.top_left, 1, 2, force_overlay=true)
+var table stickyNote = table.new(position.top_right, 1, 1, force_overlay=true)
+var table chartMark = table.new(position.bottom_right, 1, 1, force_overlay=true)
+f_watermark() =>
+    table.clear(brandMark, 0, 0, 0, 1)
+    table.clear(stickyNote, 0, 0, 0, 0)
+    table.clear(chartMark, 0, 0, 0, 0)
+    if watermarkOn
+        table.cell(brandMark, 0, 0, watermarkTitle, text_color=watermarkInk, text_size=size.normal, text_halign=text.align_left)
+        table.cell(brandMark, 0, 1, watermarkMotto, text_color=watermarkInk, text_size=size.normal, text_halign=text.align_left)
+        if watermarkInfo
+            table.cell(chartMark, 0, 0, str.format_time(viewRight, "MMM d, yyyy", TZ) + "\n" + syminfo.ticker + " | " + timeframe.period, text_color=watermarkInk, text_size=size.normal, text_halign=text.align_right)
+        if stickyOn and str.length(str.trim(stickyText)) > 0
+            table.cell(stickyNote, 0, 0, stickyText, bgcolor=color.new(stickyColor, stickyFade), text_color=watermarkInk, text_size=stickySize, text_halign=text.align_left)
+    0
+
 // SELECTED ANCHOR RETRIEVAL ---------------------------------------------------
 // Runs in the source timeframe. The [1] values are already closed; lookahead_on
 // maps availability from the NEXT source bar without leaking the selected close.
@@ -326,11 +640,11 @@ f_pick_source(int selected) =>
     bool picked = time[1] <= selected and selected < time_close[1]
     [ta.valuewhen(picked, high[1], 0), ta.valuewhen(picked, low[1], 0), ta.valuewhen(picked, time[1], 0), ta.valuewhen(picked, time_close[1], 0)]
 
-// London Lunch is a wall-clock 5-9 AM New York window, not an assumed native H4
-// bar alignment. Use four confirmed hourly samples and reject missing coverage.
-f_pick_lunch(int selected) =>
-    int begins = f_stamp(selected, 0, 5)
-    int ends = f_stamp(selected, 0, 9)
+// Manual H4 selections can reference any GTOP window, not a fixed example.
+f_pick_h4(int selected) =>
+    int hr = hour(selected, TZ)
+    int firstHour = hr < 1 ? 21 : 1 + int(math.floor((hr - 1) / 4.0)) * 4
+    [begins, ends] = f_window(selected, firstHour, firstHour + 4)
     var float chosenH = na
     var float chosenL = na
     var int coverageEnd = na
@@ -395,7 +709,7 @@ if barstate.isfirst
     array.push(anchors, SelectedAnchor.new(mbTitle, "1M", mbDate, timeframe.in_seconds("1M"), mbStatus, mbDirection, mbObjective, mbColor, mbFade, mbMode == "Manual bounds", mbHigh, mbLow, mbStart, mbEnd))
     array.push(anchors, SelectedAnchor.new(waTitle, "1W", waDate, timeframe.in_seconds("1W"), waStatus, waDirection, waObjective, waColor, waFade, waMode == "Manual bounds", waHigh, waLow, waStart, waEnd))
     array.push(anchors, SelectedAnchor.new(daTitle, "1D", daDate, timeframe.in_seconds("1D"), daStatus, daDirection, daObjective, daColor, daFade, daMode == "Manual bounds", daHigh, daLow, daStart, daEnd))
-    array.push(anchors, SelectedAnchor.new(haTitle, "H4 5-9 NY", haDate, 14400.0, haStatus, haDirection, haObjective, haColor, haFade, haMode == "Manual bounds", haHigh, haLow, haStart, haEnd))
+    array.push(anchors, SelectedAnchor.new(haTitle, "H4 NY", haDate, 14400.0, haStatus, haDirection, haObjective, haColor, haFade, haMode == "Manual bounds", haHigh, haLow, haStart, haEnd))
 
 f_capture_anchor(int index, float h, float l, int begins, int ends) =>
     if time == viewRight
@@ -404,6 +718,8 @@ f_capture_anchor(int index, float h, float l, int begins, int ends) =>
         anchor.lo := anchor.manual ? anchor.manualL : l
         anchor.begins := anchor.manual ? anchor.manualS : begins
         anchor.ends := anchor.manual ? anchor.manualE : ends
+        if index == 4 and not anchor.manual and haTitle == "H4 session" and not na(begins)
+            anchor.title := f_h4_title(begins)
         anchor.ready := not na(anchor.hi) and not na(anchor.lo) and anchor.hi > anchor.lo and not na(anchor.begins) and not na(anchor.ends) and anchor.begins < anchor.ends and anchor.ends <= time_close and (index != 4 or chartSeconds <= 3600 or time >= anchor.ends)
     0
 
@@ -424,7 +740,7 @@ if stackOn and chartSeconds <= timeframe.in_seconds("1D")
     f_capture_anchor(3, dah, dal, das, dae)
 
 if stackOn and chartSeconds <= 14400
-    [hah, hal, has, hae] = request.security(syminfo.tickerid, "60", f_pick_lunch(haDate), lookahead=barmerge.lookahead_on, calc_bars_count=8000)
+    [hah, hal, has, hae] = request.security(syminfo.tickerid, "60", f_pick_h4(haDate), lookahead=barmerge.lookahead_on, calc_bars_count=8000)
     f_capture_anchor(4, hah, hal, has, hae)
 
 var float modelH = na
@@ -445,7 +761,6 @@ if stackOn and selectedModelOn and modelTfVisible
 var array<box> stackBoxes = array.new<box>()
 var array<line> stackLines = array.new<line>()
 var array<label> stackLabels = array.new<label>()
-var table stackCard = table.new(position.top_right, 1, 9, force_overlay=true)
 
 f_clear_stack() =>
     for drawing in stackBoxes
@@ -478,16 +793,10 @@ f_render_stack(int visibleEnd) =>
                     box area = box.new(anchor.begins, anchor.hi, anchor.ends, anchor.lo, xloc=xloc.bar_time, border_color=outline, border_width=1, bgcolor=color.new(anchor.ink, anchor.fade), text=caption, text_color=color.rgb(50,50,50), text_size=size.small, text_halign=text.align_right, text_valign=text.align_top, force_overlay=true)
                     array.push(stackBoxes, area)
                 int rightEnd = visibleEnd + int(chartSeconds * 1000 * 3)
-                if extendStackBounds
-                    array.push(stackLines, line.new(math.max(anchor.ends, viewLeft), anchor.hi, rightEnd, anchor.hi, xloc=xloc.bar_time, color=color.new(anchor.ink, 30), width=1, force_overlay=true))
-                    array.push(stackLines, line.new(math.max(anchor.ends, viewLeft), anchor.lo, rightEnd, anchor.lo, xloc=xloc.bar_time, color=color.new(anchor.ink, 30), width=1, force_overlay=true))
-                if anchor.objective != "Off" and anchor.relevance == "Relevant"
+                if extendStackDol and anchor.objective != "Off" and anchor.relevance == "Relevant"
                     float target = anchor.objective == "High" ? anchor.hi : anchor.lo
                     array.push(stackLines, line.new(math.max(anchor.ends, viewLeft), target, rightEnd, target, xloc=xloc.bar_time, color=outline, width=1, force_overlay=true))
                     array.push(stackLabels, label.new(visibleEnd, target, "👀", tooltip=caption + " " + str.lower(anchor.objective) + " | " + str.tostring(target, format.mintick), xloc=xloc.bar_time, style=label.style_label_left, color=color.new(color.white,100), textcolor=color.rgb(45,45,45), size=size.small, force_overlay=true))
-            string stateText = anchor.relevance == "Retired" ? "Retired" : not scopeVisible ? "Visible on " + anchor.timeframeName + " or lower" : not anchor.ready ? "Source missing/unconfirmed: check date or use manual bounds" : anchor.relevance + " | " + str.tostring(anchor.lo, format.mintick) + " - " + str.tostring(anchor.hi, format.mintick)
-            if showStackCard
-                table.cell(stackCard, 0, i + 1, caption + " · " + anchor.timeframeName + (anchor.direction == "Unspecified" ? "" : " · " + anchor.direction) + "\n" + stateText, bgcolor=color.new(anchor.ink, 85), text_color=color.rgb(45,45,45), text_size=size.small)
         int chosenIndex = selectedModelAnchor == "Monthly A" ? 0 : selectedModelAnchor == "Monthly B" ? 1 : selectedModelAnchor == "Weekly" ? 2 : selectedModelAnchor == "Daily" ? 3 : 4
         SelectedAnchor linked = array.get(anchors, chosenIndex)
         bool linkedReady = linked.ready and linked.relevance == "Relevant" and not na(modelS) and linked.ends <= modelS
@@ -498,11 +807,6 @@ f_render_stack(int visibleEnd) =>
             array.push(stackLines, line.new(modelS, modelH, modelRight, modelH, xloc=xloc.bar_time, color=color.rgb(80,80,80), style=line.style_dashed, force_overlay=true))
             array.push(stackLines, line.new(modelS, modelL, modelRight, modelL, xloc=xloc.bar_time, color=color.rgb(80,80,80), style=line.style_dashed, force_overlay=true))
             array.push(stackLabels, label.new(modelRight, selectedModelDirection == "Bearish" ? modelL : modelH, "Model1 | " + selectedModelTF + " | " + linked.title, xloc=xloc.bar_time, style=label.style_label_left, color=color.new(color.white,100), textcolor=color.rgb(45,45,45), size=size.small, force_overlay=true))
-        if showStackCard
-            table.cell(stackCard, 0, 0, "GTOP | USER-SELECTED CONTEXT\n" + (str.length(narrativeText) > 55 ? str.substring(narrativeText, 0, 55) + "..." : narrativeText) + "\nDirection: " + narrativeDirection, bgcolor=color.new(color.rgb(226,221,194), 15), text_color=color.rgb(35,35,35), text_size=size.small)
-            table.cell(stackCard, 0, 6, intradayClock ? "SHIFT: " + (hour(viewRight,TZ) >= 9 and hour(viewRight,TZ) < 12 ? "The Job" : hour(viewRight,TZ) >= 21 ? "Nightshift" : "Not The Job") : "Descend to an intraday chart for shift execution", bgcolor=color.new(color.rgb(226,221,194), 15), text_color=color.rgb(35,35,35), text_size=size.small)
-            table.cell(stackCard, 0, 7, "EXECUTION (MANUAL MODEL1)\n" + execution, bgcolor=color.new(color.rgb(226,221,194), 15), text_color=color.rgb(35,35,35), text_size=size.small)
-            table.cell(stackCard, 0, 8, "Manual narrative. No automatic Butterfly/probability.", bgcolor=color.new(color.rgb(226,221,194), 15), text_color=color.rgb(35,35,35), text_size=size.small)
     0
 
 // RANGE ENGINE ---------------------------------------------------------------
@@ -867,7 +1171,7 @@ var line objectiveLine = na
 var label objectiveEye = na
 
 var table notice = table.new(position.bottom_left, 1, 1)
-var table focus = table.new(position.bottom_right, 1, 3, force_overlay=true)
+var table focus = table.new(position.bottom_center, 1, 3, force_overlay=true)
 if barstate.islast
     box.delete(contextBox)
     line.delete(objectiveLine)
@@ -876,6 +1180,17 @@ if barstate.islast
     objectiveLine := na
     objectiveEye := na
     int visibleEnd = nz(viewRightClose, viewRight + int(chartSeconds * 1000))
+    f_watermark()
+    f_clear_active()
+    if autoOn
+        f_draw_active(visibleMonthly, autoMonthColor, visibleEnd)
+        f_draw_active(visibleWeekly, autoWeekColor, visibleEnd)
+        f_draw_active(visibleDaily, autoDayColor, visibleEnd)
+        f_draw_active(visibleH4, autoH4Color, visibleEnd)
+        f_draw_active(visibleHourly, autoHourColor, visibleEnd)
+        f_draw_active(visibleM15, autoH4Color, visibleEnd)
+        f_draw_active(visibleM5, autoHourColor, visibleEnd)
+        f_draw_active(visibleChart, autoHourColor, visibleEnd)
     f_render_stack(visibleEnd)
     bool contextValid = not stackOn and contextSource != "Off" and not na(selectedContextHigh) and not na(selectedContextLow) and selectedContextHigh > selectedContextLow and selectedContextStart < visibleEnd
     if contextValid
@@ -927,6 +1242,9 @@ if barstate.islast
             objectiveLine := line.new(math.max(nz(objectiveStart, viewLeft), viewLeft), objective, objectiveEnd, objective, xloc=xloc.bar_time, color=targetColor, width=1, style=line.style_dashed, force_overlay=true)
             objectiveEye := label.new(visibleEnd, objective, "👀 " + targetSource + (targetSide == "High (buy-side)" ? " high" : " low"), xloc=xloc.bar_time, style=label.style_label_left, color=color.new(color.white, 100), textcolor=targetColor, size=size.small, force_overlay=true)
     string warning = ""
+    if autoOn and chartSeconds > 3600 and autoH1
+        warning := "Hourly shift CRTs: use H1 or lower. Context layers remain available."
+
     if not stackOn and contextSource == "Manual bounds" and not contextValid
         warning := "Set a valid manual context high, low and start time."
     if targetSide != "Off" and na(objective)
