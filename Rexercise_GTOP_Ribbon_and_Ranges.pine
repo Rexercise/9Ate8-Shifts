@@ -1,11 +1,12 @@
 //@version=6
-indicator("Rexercise | GTOP Ribbon + Ranges v2.2", shorttitle="GTOP v2.2", overlay=true, scale=scale.none, max_boxes_count=500, max_lines_count=500, max_labels_count=50, behind_chart=true)
+indicator("Rexercise | GTOP Butterfly of Relevance v2.3", shorttitle="GTOP v2.3", overlay=true, scale=scale.none, max_boxes_count=500, max_lines_count=500, max_labels_count=100, behind_chart=true)
 
 // INSTALL: Paste into a NEW TradingView Pine indicator, save, and Add to chart.
-// v2.2 replaces example-specific context with an automatic, confirmed-range
-// visual aid. The watermark sticky note is editable text, never generated context.
-// Automatic selection is a mechanical CRT filter, not a confirmed Butterfly or
-// entry signal. See README for the explicit lifecycle and confirmation timing.
+// v2.3: Butterfly of Relevance = one side purged + opposite DOL still pending.
+// All layers advance chronologically; untouched candidates remain hidden.
+// Keep a relevant range until delivery/invalidation, then advance to the next
+// qualifying range. The watermark sticky note never drives selection.
+// This visual aid does not confirm an entry. See README for confirmation timing.
 // The compact chart drawing is retained: a slim, light time-aligned strip
 // inside the PRICE chart. Its blocks use real New York timestamps and move
 // with candles when scrolling/zooming. The ribbon uses no fixed-screen table
@@ -34,17 +35,19 @@ indicator("Rexercise | GTOP Ribbon + Ranges v2.2", shorttitle="GTOP v2.2", overl
 
 // SETTINGS -------------------------------------------------------------------
 // Automatic boxes are selected from price, never a named example date.
-string G_AUTO = "00 | Butterfly visual aid"
-bool autoOn = input.bool(true, "Box in-play ranges automatically", group=G_AUTO, tooltip="Completed source candles only. Removes a range after a source-timeframe close outside it. By default also removes ranges with both extremes taken. This is a mechanical visual filter, not a confirmed Butterfly or entry.")
+string G_AUTO = "00 | Butterfly of Relevance"
+bool autoOn = input.bool(true, "Box relevant ranges automatically", group=G_AUTO, tooltip="Relevant means one side has been purged and the opposite DOL remains pending. Untouched candidates stay hidden. Confirmed source closes invalidate; reaching the DOL completes relevance. The same chronological framework applies to every layer.")
 bool autoM = input.bool(true, "Monthly", inline="layers", group=G_AUTO)
 bool autoW = input.bool(true, "Weekly", inline="layers", group=G_AUTO)
 bool autoD = input.bool(true, "Daily", inline="layers", group=G_AUTO)
 bool autoH4 = input.bool(true, "GTOP H4", inline="layers2", group=G_AUTO)
 bool autoH1 = input.bool(true, "Hourly shift CRT", inline="layers2", group=G_AUTO)
+bool autoM15 = input.bool(true, "M15", inline="layers3", group=G_AUTO)
+bool autoM5 = input.bool(true, "M5", inline="layers3", group=G_AUTO)
+bool autoChart = input.bool(true, "Other chart timeframes", inline="layers3", group=G_AUTO, tooltip="Applies the same relevance sequence to the current chart timeframe if it is not already covered by M/W/D/GTOP H4/H1/M15/M5. Examples: M1, M30, H2. No duplicate native H4 alongside GTOP H4.")
 int autoLookback = input.int(120, "Source ranges to consider per layer", minval=12, maxval=240, group=G_AUTO, tooltip="Bounds the available history; this does not claim to scan all history. H4 uses complete New York windows. H1 starts at 8 and rolls only after invalidation within the following shift.")
-int autoKeep = input.int(3, "Most recent in-play boxes per context layer", minval=1, maxval=8, group=G_AUTO, tooltip="Monthly, weekly, daily and H4 each have this display limit. Older still-active ranges are retained internally within the lookback. H1 has one chronological shift range.")
-bool retireTaken = input.bool(true, "Hide ranges after both extremes have been taken", group=G_AUTO, tooltip="An extreme is taken when a later confirmed source candle reaches it. Taking both removes the remaining outer-liquidity reference. This does not count a win or infer intrabar event order. A 50% touch alone never retires a range.")
-bool autoDol = input.bool(true, "Extend draw on liquidity only", group=G_AUTO, tooltip="After one strict extreme purge with a close inside, extends the opposite extreme. An untouched range has no inferred DOL line. No paired high/low extensions.")
+int autoKeep = input.int(3, "Relevant ranges per context layer (oldest first)", minval=1, maxval=8, group=G_AUTO, tooltip="Applies AFTER the purge-and-pending-DOL test. The oldest surviving relevant ranges keep priority; newer untouched candles never displace them. Raise this to show more concurrent relevant ranges. H1 has one chronological shift anchor.")
+bool autoDol = input.bool(true, "Extend draw on liquidity only", group=G_AUTO, tooltip="Extends the pending opposite extreme after a one-side purge. Untouched or completed ranges are not shown. No paired high/low extensions.")
 bool autoMidpoints = input.bool(false, "Optional internal 50% reference", group=G_AUTO)
 int autoFill = input.int(96, "Box fill transparency", minval=80, maxval=100, group=G_AUTO)
 color autoMonthColor = input.color(color.rgb(120,120,135), "Monthly", inline="autoColor1", group=G_AUTO)
@@ -361,14 +364,36 @@ type ActiveRange
     bool upperPurged = false
     bool lowerPurged = false
 
-// 0 = remains, 1 = source-close invalidation, 2 = both extremes consumed.
-// Strict close-outside takes precedence; a wick alone does not invalidate.
+// 0 = remains (waiting or relevant), 1 = source-close invalidation,
+// 2 = objective delivered or both sides reached in the activation candle.
+// Objective tracking starts at the first strict purge, not before it.
+// Equal-edge touches alone do not activate relevance. Same-bar two-sided
+// action has no provably pending DOL; suppress it without inferring event order.
 f_active_reason(ActiveRange r, float h, float l, float c) =>
-    r.highTaken := r.highTaken or h >= r.hi
-    r.lowTaken := r.lowTaken or l <= r.lo
-    r.upperPurged := r.upperPurged or h > r.hi
-    r.lowerPurged := r.lowerPurged or l < r.lo
-    c > r.hi or c < r.lo ? 1 : retireTaken and r.highTaken and r.lowTaken ? 2 : 0
+    int reason = 0
+    if c > r.hi or c < r.lo
+        reason := 1
+    else if r.upperPurged
+        r.lowTaken := r.lowTaken or l <= r.lo
+        reason := r.lowTaken ? 2 : 0
+    else if r.lowerPurged
+        r.highTaken := r.highTaken or h >= r.hi
+        reason := r.highTaken ? 2 : 0
+    else if h > r.hi
+        r.upperPurged := true
+        r.highTaken := true
+        r.lowTaken := l <= r.lo
+        r.lowerPurged := l < r.lo
+        reason := r.lowTaken ? 2 : 0
+    else if l < r.lo
+        r.lowerPurged := true
+        r.lowTaken := true
+        r.highTaken := h >= r.hi
+        reason := r.highTaken ? 2 : 0
+    reason
+
+f_relevant(ActiveRange r) =>
+    (r.upperPurged and not r.lowerPurged and not r.lowTaken) or (r.lowerPurged and not r.upperPurged and not r.highTaken)
 
 f_active_step(array<ActiveRange> pool, float h, float l, float c, int s, int e, int seq, string title) =>
     int i = array.size(pool) - 1
@@ -389,10 +414,14 @@ f_active_snapshot(array<ActiveRange> pool, bool atViewport) =>
     array<ActiveRange> result = na
     if atViewport
         result := array.new<ActiveRange>()
-        int first = math.max(0, array.size(pool) - autoKeep)
-        int i = first
-        while i < array.size(pool)
-            array.push(result, ActiveRange.copy(array.get(pool, i)))
+        int i = 0
+        // Chronological priority is stable until a range delivers/invalidates.
+        // Filter BEFORE applying the display cap so waiting candles cannot
+        // hide an older purged range with an objective still pending.
+        while i < array.size(pool) and array.size(result) < autoKeep
+            ActiveRange r = array.get(pool, i)
+            if f_relevant(r)
+                array.push(result, ActiveRange.copy(r))
             i += 1
     result
 
@@ -401,8 +430,8 @@ f_native_active(string layer) =>
     var int seq = 0
     if not na(time[1])
         seq += 1
-        string datePattern = layer == "M" ? "MMM yyyy" : "MMM d, yyyy"
-        string title = layer + " | " + str.format_time(time[1], datePattern, syminfo.timezone)
+        string datePattern = layer == "M" ? "MMM yyyy" : timeframe.isintraday ? "MMM d HH:mm" : "MMM d, yyyy"
+        string title = layer + " | " + str.format_time(time[1], datePattern, timeframe.isintraday ? TZ : syminfo.timezone)
         f_active_step(pool, high[1], low[1], close[1], time[1], time_close[1], seq, title)
     f_active_snapshot(pool, time <= viewRight and viewRight < time_close)
 
@@ -510,6 +539,9 @@ var array<ActiveRange> visibleWeekly = na
 var array<ActiveRange> visibleDaily = na
 var array<ActiveRange> visibleH4 = na
 var array<ActiveRange> visibleHourly = na
+var array<ActiveRange> visibleM15 = na
+var array<ActiveRange> visibleM5 = na
+var array<ActiveRange> visibleChart = na
 if autoOn and autoM and chartSeconds <= timeframe.in_seconds("1M")
     monthRanges = request.security(syminfo.tickerid, "1M", f_native_active("M"), lookahead=barmerge.lookahead_on, calc_bars_count=500)
     if time == viewRight
@@ -533,6 +565,19 @@ if autoOn and autoH1 and chartSeconds <= 3600
     hourRanges = request.security(syminfo.tickerid, "60", f_shift_active(), lookahead=barmerge.lookahead_on, calc_bars_count=8000)
     if time == viewRight
         visibleHourly := hourRanges
+if autoOn and autoM15 and chartSeconds <= 900
+    m15Ranges = request.security(syminfo.tickerid, "15", f_native_active("M15"), lookahead=barmerge.lookahead_on, calc_bars_count=500)
+    if time == viewRight
+        visibleM15 := m15Ranges
+if autoOn and autoM5 and chartSeconds <= 300
+    m5Ranges = request.security(syminfo.tickerid, "5", f_native_active("M5"), lookahead=barmerge.lookahead_on, calc_bars_count=500)
+    if time == viewRight
+        visibleM5 := m5Ranges
+bool chartLayerCovered = timeframe.period == "1M" or timeframe.period == "1W" or timeframe.period == "1D" or timeframe.period == "240" or timeframe.period == "60" or timeframe.period == "15" or timeframe.period == "5"
+if autoOn and autoChart and not chartLayerCovered
+    chartRanges = f_native_active("Chart " + timeframe.period)
+    if time == viewRight
+        visibleChart := chartRanges
 
 var array<box> autoBoxes = array.new<box>()
 var array<line> autoLines = array.new<line>()
@@ -554,10 +599,10 @@ f_draw_active(array<ActiveRange> ranges, color ink, int visibleEnd) =>
     if not na(ranges)
         for r in ranges
             int leftX = math.max(r.begins, viewLeft)
-            if r.ends <= visibleEnd and leftX < visibleEnd
+            if f_relevant(r) and r.ends <= visibleEnd and leftX < visibleEnd
                 bool drawLow = r.upperPurged and not r.lowTaken
                 bool drawHigh = r.lowerPurged and not r.highTaken
-                string status = drawLow ? "BSL purged" : drawHigh ? "SSL purged" : "intact"
+                string status = drawLow ? "BSL purged | low DOL pending" : "SSL purged | high DOL pending"
                 string caption = rangeLabels ? r.title + " | " + status : ""
                 box area = box.new(leftX, r.hi, visibleEnd, r.lo, xloc=xloc.bar_time, bgcolor=color.new(ink, autoFill), border_color=color.new(ink, 45), text=caption, text_color=ink, text_size=size.tiny, text_halign=text.align_left, text_valign=text.align_top, force_overlay=true)
                 array.push(autoBoxes, area)
@@ -1143,6 +1188,9 @@ if barstate.islast
         f_draw_active(visibleDaily, autoDayColor, visibleEnd)
         f_draw_active(visibleH4, autoH4Color, visibleEnd)
         f_draw_active(visibleHourly, autoHourColor, visibleEnd)
+        f_draw_active(visibleM15, autoH4Color, visibleEnd)
+        f_draw_active(visibleM5, autoHourColor, visibleEnd)
+        f_draw_active(visibleChart, autoHourColor, visibleEnd)
     f_render_stack(visibleEnd)
     bool contextValid = not stackOn and contextSource != "Off" and not na(selectedContextHigh) and not na(selectedContextLow) and selectedContextHigh > selectedContextLow and selectedContextStart < visibleEnd
     if contextValid
