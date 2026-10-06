@@ -1,88 +1,121 @@
-# 9Ate8 Shifts — GTOP Ribbon + Ranges
+# 9Ate8 Shifts — GTOP Butterfly Visual Aid
 
-Rexercise's Pine Script v6 indicator for a continuous session ribbon beneath
-price, selected GTOP ranges, and manual higher-timeframe context.
+Rexercise's Pine v6 indicator: automatic range boxes for top-down review, the
+GTOP shift ribbon, and a watermark with an optional personal sticky note.
 
-**Current source: v2.1.**
-[Open the complete Pine script](Rexercise_GTOP_Ribbon_and_Ranges.pine).
-This is the saved October 5, 2026 version matching the higher hand-drawn ribbon.
-The source is now tracked here; compilation and visual acceptance in TradingView
-remain pending. It is an indicator, not an order-execution bot or a backtested
-strategy.
+**v2.2 draft: TradingView compilation and visual acceptance remain pending.**
+[Complete Pine source](Rexercise_GTOP_Ribbon_and_Ranges.pine).
 
-## Install in TradingView
+## Changes
 
-1. Open the script above, choose **Raw**, and copy the complete contents.
-2. In TradingView's Pine Editor, create a new indicator and replace its contents.
-3. Save and select **Add to chart**. Report any compiler error with its line number.
-4. Use standard candles. Session ribbons and intraday range tracking run on
-   1-minute through 4-hour charts; higher chart timeframes show selected context.
-5. If replacing an older separate-pane version, remove that chart instance and
-   add this version again.
+- Replaced the generated sequence/context card with an editable, multiline
+  sticky note in the watermark settings. Its text does not drive range logic.
+- Removed preselected July, September, Week3Sep, Thursday, London Lunch, and the
+  October 5 bullish annotation. Dates start unset; shift biases start neutral.
+  Manual H4 selection now supports any GTOP window.
+- Automatic boxes are on by default. Manual anchors, gray context, and extra
+  scheduled/historical range boxes are off by default.
+- Each range keeps its box and **only its DOL extends**. No paired high/low rays.
+  Optional internal 50% lines are off by default.
 
-## Ribbon defaults
+## Automatic selection: starting assumptions for review
 
-All session boundaries use **America/New_York**, including daylight saving.
+This is a **mechanical candidate filter**, not a claim that Rexercise's complete
+GTOP Butterfly criteria have been formalized or that a setup is confirmed.
 
-| Block | New York time |
+1. Consider completed source candles within a bounded lookback (default 120
+   source ranges per context layer), using their full wick high/low.
+2. Retain older ranges through inside candles and single-side purges. A confirmed
+   source-timeframe close strictly outside retires a range. A wick alone, or a
+   close exactly on the boundary, does not invalidate it.
+3. By default, also retire a range after both extremes have been reached by
+   later completed source candles. This optional display rule identifies
+   consumed outer liquidity; it does not infer intrabar order or count a win.
+   A 50% touch alone never retires a range.
+4. After a strict one-side purge and close inside, extend the opposite untaken
+   extreme as DOL. Untouched ranges remain boxed without an inferred DOL line.
+5. Display the three most recent survivors per context layer (adjustable 1–8).
+   Older survivors remain eligible within the lookback, but the display cap can
+   hide them. This is not an all-history scan.
+
+| Layer | Source and visibility |
 | --- | --- |
-| Not The Job | Midnight–9 AM |
-| The Job / Day Shift | 9 AM–noon |
-| Not The Job | Noon–9 PM |
-| Nightshift | 9 PM–midnight |
+| Monthly | Native completed monthly candles; monthly charts or lower |
+| Weekly | Native completed weekly candles; weekly charts or lower |
+| Daily | Native completed daily candles; daily charts or lower |
+| GTOP H4 | Complete New York windows from hourly data; H4 charts or lower |
+| Hourly shift CRT | Chronological 8/9/10/11 selection; H1 charts or lower |
 
-The ribbon uses soft colors, one row, centered labels, and adjustable height and
-gap beneath the visible candles. Labels shorten or hide when zoomed out. Matching
-name-only blocks can join across market closures to avoid crowded repeated labels.
-The current block extends to its scheduled end; the complete future-day schedule
-is off by default. These extensions represent time windows only.
+GTOP H4 windows: 1–5 AM Asia Expansion, 5–9 AM London Lunch, 9 AM–1 PM
+GCT / New York AM, 1–5 PM New York PM, 5–9 PM CBDR + Early Asia, and
+9 PM–1 AM Asia Open. The separate 2–8 PM CBDR and Monday boxes remain optional
+scheduled overlays; this version does not automatically rank them as candidates.
 
-The green October 5 Day Shift block is a **manual annotation** from the drawing.
-Other dates stay neutral with the default selected-date scope. Reset the bias,
-date, and context-anchor inputs for a new analysis. The July/September, weekly,
-Thursday, and London Lunch context selections are saved examples, not dynamically
-chosen current-market recommendations.
+Hourly selection begins with the completed 8 AM/PM range. Only a close outside
+rolls to the candle that invalidated it while time remains in the 9–12 shift.
+Replacements are labeled **Shift CRT**, not another 9ate8. Both-extremes
+consumption stops reselection for that shift under the default rule. Noon and
+midnight clear the hourly selection. Missing hourly coverage stops the affected
+sequence; missing H4 coverage clears unverified H4 state.
 
-For a ribbon-only view, disable **Selected context stack** and **Enable price
-range boxes**, and set **Gray context range** to **Off**. Ribbon height, gap, text
-size, optional times, and a second H4 row are in Inputs. If distant selected
-objectives compress price, use the chart's **Scale price chart only** setting.
+## Confirmation timing and limits
 
-## Ranges and observations
+State uses **closed source candles**, available at the next source bar opening.
+Daily purge/retirement updates therefore follow a daily close, weekly updates a
+weekly close, and monthly updates a monthly close. This is **not live intraday
+purge detection** for those layers. GTOP H4 updates with the next hourly sample
+following its window. This conservative timing is a limitation of this draft.
 
-- 8 AM and 8 PM range boxes are enabled by default, with optional 50% lines.
-- Optional 7, 9, 10, and 11 o'clock ranges, six H4 windows, CBDR 2–8 PM, and Monday
-  ranges are available. GCT is the 9 AM–1 PM New York AM H4 window.
-- Developing ranges change until complete. Missing coverage is marked PARTIAL or
-  omitted; unavailable older intrabars are not reconstructed as known prices.
-- Optional 8 o'clock observations report extreme sweeps and completed hourly
-  closes outside that range during its following shift. They do not automatically
-  roll to the next range, classify a CRT variant, or establish an entry.
-- Model1 selection, direction, anchor relevance, narrative, and objectives are
-  manual. The selected Model1 CISD check uses a confirmed assigned-timeframe close
-  strictly beyond that candle's full high/low.
+Historical scrolling shows confirmed source state available at the viewport's
+right edge. M/W/D boundaries follow the symbol's native session; named GTOP
+windows and ribbons use **America/New_York**. Use standard time-based candles.
 
-**9ate8** refers to the 8 o'clock CRT in its following shift. A later chronological
-range can be a Shift trade without becoming another 9ate8. This script makes no
-statistical-edge, profitability, or automatic Butterfly claim.
+Layers remain independent: internal DOL is not discarded merely because a
+higher-timeframe box exists. The engine does not force directional agreement,
+confirm a parent-child Butterfly, classify CSD, estimate probability, or place
+orders. The older optional manual execution overlays remain available.
 
-## Validation status
+## Install and watermark
 
-The imported `.pine` file was checked byte-for-byte against the saved v2.1 source.
-Source review and text-integrity checks are not a TradingView compiler run.
-The following platform checks remain **NOT RUN** for this GitHub publication:
+1. Open the Pine source, choose Raw, and paste the complete script into a new
+   TradingView Pine Editor indicator. Save and Add to chart.
+2. Remove the old indicator instance, or reset inputs, to clear saved example
+   settings. Editing source does not necessarily replace saved chart inputs.
+3. Under **Watermark and sticky note**, enter **My sticky note**. **Sticky note**
+   toggles the note; **Watermark** toggles the whole watermark. Blank notes draw
+   nothing. The title, motto, symbol/date, note size, and colors are configurable.
+4. Use H1 or lower for hourly shift analysis. For a ribbon-only view, turn off
+   automatic boxes and leave manual/scheduled boxes off.
 
-- Compile in Pine Editor and add to a standard 1m/5m chart without errors.
-- Compare the ribbon with the supplied drawing, including Friday–Monday closures,
-  zoomed-out labels, historical scrolling, and the current-block end.
-- Check 9 AM/noon/9 PM/midnight boundaries and New York daylight-saving transitions.
-- Compare complete 8 AM/PM highs, lows, and midpoints with source candles; check
-  PARTIAL behavior when coverage is missing and on bars crossing hour boundaries.
-- Confirm sweeps do not imply entry confirmation and invalidation waits for a
-  completed hourly close strictly outside the selected 8 o'clock range.
-- Check manual context/Model1 selection, prior confirmed source candles, and
-  timeframe restrictions using Bar Replay and a live chart.
+The connected Not The Job / The Job / Nightshift ribbon, visible-chart placement,
+and optional H4 row are retained. Recreate TradingView alerts after script/input
+changes. Existing eight-o'clock alerts remain separate from the automatic display.
 
-Record the chart symbol, timeframe, timezone, source commit, and result when these
-checks are performed. Existing TradingView alerts should be recreated after
-changing their script or input settings.
+## Validation
+
+Run `npm ci && npm test`. Tests execute exact extracted Pine lifecycle functions
+against synthetic OHLC fixtures with pinned **PineTS 0.11.0**, and parse the full
+source. PineTS is a third-party runtime, not TradingView's compiler.
+
+- **14 checks passed**: parsing; wick/close/boundary invalidation; midpoint
+  retention; consumed extremes; older nested ranges; chronological rollover;
+  shift expiry and delivery stop; missing shift data; complete H4 and missing-hour
+  aggregation; a single DOL extension without paired rays.
+- **2 DST fixtures skipped**: an isolated probe demonstrated that PineTS returns
+  the wrong UTC timestamp for 5 AM New York on both 2026 transition dates. These
+  are explicitly reported as skips, not passes.
+- A full-source local smoke run reached the watermark/ribbon renderer.
+  Multi-timeframe range integration remains unverified: a minimal PineTS
+  `request.security()` conditional-array reproduction returned `na`, whereas
+  the identical local function returned the expected array.
+
+**Required in TradingView:** compile/add-to-chart; validate M/W/D and H4 snapshots
+on live and historical charts; verify source-close timing and historical
+scrolling; check March 8 and November 1, 2026 NY DST; inspect note toggles, single
+DOL rays, box readability, and ribbon layout. Confirm the mechanical
+selection/retirement assumptions against the intended Butterfly process before
+treating this draft as final.
+
+Implementation references: [confirmed HTF data](https://www.tradingview.com/pine-script-docs/concepts/other-timeframes-and-data/),
+[conditional collections](https://www.tradingview.com/pine-script-docs/errors/RE10139/),
+[multiline input](https://www.tradingview.com/pine-script-docs/concepts/inputs/).
